@@ -1,38 +1,34 @@
 /**
- Licensed to the Apache Software Foundation (ASF) under one or more
- contributor license agreements.  See the NOTICE file distributed with
- this work for additional information regarding copyright ownership.
- The ASF licenses this file to You under the Apache License, Version 2.0
- (the "License"); you may not use this file except in compliance with
- the License.  You may obtain a copy of the License at
-
- http://www.apache.org/licenses/LICENSE-2.0
-
- Unless required by applicable law or agreed to in writing, software
- distributed under the License is distributed on an "AS IS" BASIS,
- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- See the License for the specific language governing permissions and
- limitations under the License.
- limitations under the License.
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ * <p>
+ * http://www.apache.org/licenses/LICENSE-2.0
+ * <p>
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ * limitations under the License.
  */
 
 package org.apache.flume.sink.kafka;
 
 import com.google.common.base.Throwables;
-import kafka.javaapi.producer.Producer;
-import kafka.producer.KeyedMessage;
-import kafka.producer.ProducerConfig;
 import org.apache.flume.*;
 import org.apache.flume.conf.Configurable;
 import org.apache.flume.instrumentation.kafka.KafkaSinkCounter;
 import org.apache.flume.sink.AbstractSink;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Properties;
-import java.util.List;
-import java.util.Map;
-import java.util.ArrayList;
+import java.util.*;
 
 /**
  * A Flume Sink that can publish messages to Kafka.
@@ -66,156 +62,188 @@ import java.util.ArrayList;
  */
 public class KafkaSink extends AbstractSink implements Configurable {
 
-  private static final Logger logger = LoggerFactory.getLogger(KafkaSink.class);
-  public static final String KEY_HDR = "key";
-  public static final String TOPIC_HDR = "topic";
-  private Properties kafkaProps;
-  private Producer<String, byte[]> producer;
-  private String topic;
-  private int batchSize;
-  private List<KeyedMessage<String, byte[]>> messageList;
-  private KafkaSinkCounter counter;
+    private static final Logger logger = LoggerFactory.getLogger(KafkaSink.class);
+    public static final String KEY_HDR = "key";
+    public static final String TOPIC_HDR = "topic";
+    private Properties kafkaProps;
+    private KafkaProducer<String, byte[]> producer;
+    private String topic;
+    private int batchSize;
+    //    private List<KeyedMessage<String, byte[]>> messageList;
+    private KafkaSinkCounter counter;
+    private List<byte[]> messageList;
+
+    private int listSizeCounter = 0;
+
+    @Override
+    public Status process() throws EventDeliveryException {
+        Status result = Status.READY;
+        Channel channel = getChannel();
+        Transaction transaction = null;
+        Event event = null;
+        String eventTopic = null;
+        String eventKey = null;
+
+        try {
+            long processedEvents = 0;
 
 
-  @Override
-  public Status process() throws EventDeliveryException {
-    Status result = Status.READY;
-    Channel channel = getChannel();
-    Transaction transaction = null;
-    Event event = null;
-    String eventTopic = null;
-    String eventKey = null;
 
-    try {
-      long processedEvents = 0;
+            transaction = channel.getTransaction();
+            transaction.begin();
 
-      transaction = channel.getTransaction();
-      transaction.begin();
+            messageList.clear();
+            for (; processedEvents < batchSize; processedEvents += 1) {
+                event = channel.take();
 
-      messageList.clear();
-      for (; processedEvents < batchSize; processedEvents += 1) {
-        event = channel.take();
+                if (event == null) {
+                    // no events available in channel
+                    break;
+                }
 
-        if (event == null) {
-          // no events available in channel
-          break;
+                byte[] eventBody = event.getBody();
+
+                Map<String, String> headers = event.getHeaders();
+
+                if ((eventTopic = headers.get(TOPIC_HDR)) == null) {
+                    eventTopic = topic;
+                }
+
+                eventKey = headers.get(KEY_HDR);
+
+                if (logger.isDebugEnabled()) {
+                    logger.debug("{Event} " + eventTopic + " : " + eventKey + " : "
+                            + new String(eventBody, "UTF-8"));
+                    logger.debug("event #{}", processedEvents);
+                }
+
+                // create a message and add to buffer
+//                KeyedMessage<String, byte[]> data = new KeyedMessage<String, byte[]>
+//                        (eventTopic, eventKey, eventBody);
+                if(listSizeCounter < batchSize){
+                    messageList.add(eventBody);
+                    listSizeCounter += 1;
+                } else {
+                    new Thread(new KafkaProducerThread(messageList, producer)).start();
+                    listSizeCounter = 0;
+                }
+
+            }
+
+            // publish batch and commit.
+            if (processedEvents > 0) {
+                long startTime = System.nanoTime();
+
+//                producer.send(messageList);
+                long endTime = System.nanoTime();
+                counter.addToKafkaEventSendTimer((endTime - startTime) / (1000 * 1000));
+                counter.addToEventDrainSuccessCount(Long.valueOf(messageList.size()));
+            }
+
+            transaction.commit();
+
+        } catch (Exception ex) {
+            String errorMsg = "Failed to publish events";
+            logger.error("Failed to publish events", ex);
+            result = Status.BACKOFF;
+            if (transaction != null) {
+                try {
+                    transaction.rollback();
+                    counter.incrementRollbackCount();
+                } catch (Exception e) {
+                    logger.error("Transaction rollback failed", e);
+                    throw Throwables.propagate(e);
+                }
+            }
+            throw new EventDeliveryException(errorMsg, ex);
+        } finally {
+            if (transaction != null) {
+                transaction.close();
+            }
         }
 
-        byte[] eventBody = event.getBody();
-        Map<String, String> headers = event.getHeaders();
+        return result;
+    }
 
-        if ((eventTopic = headers.get(TOPIC_HDR)) == null) {
-          eventTopic = topic;
+    @Override
+    public synchronized void start() {
+        // instantiate the producer
+        producer = new KafkaProducer<>(kafkaProps);
+        counter.start();
+        super.start();
+    }
+
+    @Override
+    public synchronized void stop() {
+        producer.close();
+        counter.stop();
+        logger.info("Kafka Sink {} stopped. Metrics: {}", getName(), counter);
+        super.stop();
+    }
+
+
+    /**
+     * We configure the sink and generate properties for the Kafka Producer
+     * <p>
+     * Kafka producer properties is generated as follows:
+     * 1. We generate a properties object with some static defaults that
+     * can be overridden by Sink configuration
+     * 2. We add the configuration users added for Kafka (parameters starting
+     * with .kafka. and must be valid Kafka Producer properties
+     * 3. We add the sink's documented parameters which can override other
+     * properties
+     *
+     * @param context
+     */
+    @Override
+    public void configure(Context context) {
+
+        batchSize = context.getInteger(KafkaSinkConstants.BATCH_SIZE,
+                KafkaSinkConstants.DEFAULT_BATCH_SIZE);
+        messageList = new LinkedList<>();
+        logger.debug("Using batch size: {}", batchSize);
+
+        topic = context.getString(KafkaSinkConstants.TOPIC,
+                KafkaSinkConstants.DEFAULT_TOPIC);
+        if (topic.equals(KafkaSinkConstants.DEFAULT_TOPIC)) {
+            logger.warn("The Property 'topic' is not set. " +
+                    "Using the default topic name: " +
+                    KafkaSinkConstants.DEFAULT_TOPIC);
+        } else {
+            logger.info("Using the static topic: " + topic +
+                    " this may be over-ridden by event headers");
         }
 
-        eventKey = headers.get(KEY_HDR);
+        kafkaProps = KafkaSinkUtil.getKafkaProperties(context);
+        kafkaProps.put("transactional.id", "gw2-transaction-id");
 
         if (logger.isDebugEnabled()) {
-          logger.debug("{Event} " + eventTopic + " : " + eventKey + " : "
-            + new String(eventBody, "UTF-8"));
-          logger.debug("event #{}", processedEvents);
+            logger.debug("Kafka producer properties: " + kafkaProps);
         }
 
-        // create a message and add to buffer
-        KeyedMessage<String, byte[]> data = new KeyedMessage<String, byte[]>
-          (eventTopic, eventKey, eventBody);
-        messageList.add(data);
-
-      }
-
-      // publish batch and commit.
-      if (processedEvents > 0) {
-        long startTime = System.nanoTime();
-        producer.send(messageList);
-        long endTime = System.nanoTime();
-        counter.addToKafkaEventSendTimer((endTime-startTime)/(1000*1000));
-        counter.addToEventDrainSuccessCount(Long.valueOf(messageList.size()));
-      }
-
-      transaction.commit();
-
-    } catch (Exception ex) {
-      String errorMsg = "Failed to publish events";
-      logger.error("Failed to publish events", ex);
-      result = Status.BACKOFF;
-      if (transaction != null) {
-        try {
-          transaction.rollback();
-          counter.incrementRollbackCount();
-        } catch (Exception e) {
-          logger.error("Transaction rollback failed", e);
-          throw Throwables.propagate(e);
+        if (counter == null) {
+            counter = new KafkaSinkCounter(getName());
         }
-      }
-      throw new EventDeliveryException(errorMsg, ex);
-    } finally {
-      if (transaction != null) {
-        transaction.close();
-      }
+
+        producer.initTransactions();
     }
 
-    return result;
-  }
+    private class KafkaProducerThread implements Runnable {
 
-  @Override
-  public synchronized void start() {
-    // instantiate the producer
-    ProducerConfig config = new ProducerConfig(kafkaProps);
-    producer = new Producer<String, byte[]>(config);
-    counter.start();
-    super.start();
-  }
-
-  @Override
-  public synchronized void stop() {
-    producer.close();
-    counter.stop();
-    logger.info("Kafka Sink {} stopped. Metrics: {}", getName(), counter);
-    super.stop();
-  }
+        private List messagesList;
+        private KafkaProducer producer;
 
 
-  /**
-   * We configure the sink and generate properties for the Kafka Producer
-   *
-   * Kafka producer properties is generated as follows:
-   * 1. We generate a properties object with some static defaults that
-   * can be overridden by Sink configuration
-   * 2. We add the configuration users added for Kafka (parameters starting
-   * with .kafka. and must be valid Kafka Producer properties
-   * 3. We add the sink's documented parameters which can override other
-   * properties
-   *
-   * @param context
-   */
-  @Override
-  public void configure(Context context) {
+        KafkaProducerThread(List<byte[]> messagesList, KafkaProducer<String, byte[]> producer) {
+            this.messagesList = messagesList;
+            this.producer = producer;
+        }
 
-    batchSize = context.getInteger(KafkaSinkConstants.BATCH_SIZE,
-      KafkaSinkConstants.DEFAULT_BATCH_SIZE);
-    messageList =
-      new ArrayList<KeyedMessage<String, byte[]>>(batchSize);
-    logger.debug("Using batch size: {}", batchSize);
-
-    topic = context.getString(KafkaSinkConstants.TOPIC,
-      KafkaSinkConstants.DEFAULT_TOPIC);
-    if (topic.equals(KafkaSinkConstants.DEFAULT_TOPIC)) {
-      logger.warn("The Property 'topic' is not set. " +
-        "Using the default topic name: " +
-        KafkaSinkConstants.DEFAULT_TOPIC);
-    } else {
-      logger.info("Using the static topic: " + topic +
-        " this may be over-ridden by event headers");
+        @Override
+        public void run() {
+            producer.beginTransaction();
+            messagesList.forEach(message -> producer.send(new ProducerRecord(topic, message)));
+            producer.commitTransaction();
+        }
     }
-
-    kafkaProps = KafkaSinkUtil.getKafkaProperties(context);
-
-    if (logger.isDebugEnabled()) {
-      logger.debug("Kafka producer properties: " + kafkaProps);
-    }
-
-    if (counter == null) {
-      counter = new KafkaSinkCounter(getName());
-    }
-  }
 }

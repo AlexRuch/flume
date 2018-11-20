@@ -18,8 +18,6 @@
 
 package org.apache.flume.sink.kafka;
 
-import kafka.serializer.StringDecoder;
-
 public class KafkaSinkConstants {
 
   public static final String PROPERTY_PREFIX = "kafka.";

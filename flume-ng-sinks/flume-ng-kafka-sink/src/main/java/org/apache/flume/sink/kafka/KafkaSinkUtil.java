@@ -20,7 +20,6 @@ import org.apache.flume.Context;
 import org.apache.flume.conf.ConfigurationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import scala.util.PropertiesTrait;
 
 import java.util.Map;
 import java.util.Properties;

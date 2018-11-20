@@ -54,7 +54,7 @@ import com.google.common.collect.Lists;
 import com.google.common.eventbus.EventBus;
 import com.google.common.eventbus.Subscribe;
 
-public class Application {
+public class  Application {
 
   private static final Logger logger = LoggerFactory
       .getLogger(Application.class);
