@@ -48,14 +48,6 @@ public class KafkaSinkUtil {
   private static void addDocumentedKafkaProps(Context context,
                                               Properties kafkaProps)
           throws ConfigurationException {
-    String brokerList = context.getString(KafkaSinkConstants
-            .BROKER_LIST_FLUME_KEY);
-    if (brokerList == null) {
-      throw new ConfigurationException("brokerList must contain at least " +
-              "one Kafka broker");
-    }
-    kafkaProps.put(KafkaSinkConstants.BROKER_LIST_KEY, brokerList);
-
     String requiredKey = context.getString(
             KafkaSinkConstants.REQUIRED_ACKS_FLUME_KEY);
 

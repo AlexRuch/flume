@@ -69,28 +69,18 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
     public static final String TOPIC_HDR = "topic";
     private String topic;
     private volatile KafkaSinkCounter counter;
+    private int batchSize;
 
 
-    private static final int numberOfThreads = 16;
-    private static final KafkaSink[] producerArr = new KafkaSink[numberOfThreads];
-    private static final KafkaProducer[] kafkaProducers = new KafkaProducer[numberOfThreads];
-    private static final Properties props = new Properties();
-    private static String[] messagesQueue = new String[30000];
+    private static int numberOfThreads;
+    private static KafkaSink[] producerArr;
+    private static KafkaProducer[] kafkaProducers;
+    private static Properties props;
+    private static String[] messagesQueue;
     private KafkaSink deadThread = null;
     private KafkaSink newKafkaSink = null;
     private boolean taskInWork;
     private int producerIndex = 0;
-//    private int queueSize = 10000;
-
-    {
-        props.put("bootstrap.servers", "localhost:9092");
-        props.put("key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        props.put("value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        props.put("buffer.memory", "67108864");
-        props.put("batch.size", "30000");
-//        props.put("compression.type", "lz4");
-    }
-
 
     @Override
     public Status process() throws EventDeliveryException {
@@ -101,20 +91,10 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
         String eventTopic = null;
         String eventKey = null;
 
-        messagesQueue = new String[30000];
+        messagesQueue = new String[batchSize];
         try {
-            int processedEvents = 0;
-
             transaction = channel.getTransaction();
             transaction.begin();
-
-//            for (; processedEvents < 100000; processedEvents += 1) {
-//                event = channel.take();
-//                if (event == null) {
-//                    break;
-//                }
-//                messagesQueue[processedEvents] = new String(event.getBody());
-//            }
             taskInWork = false;
             int queueNum = 0;
             while (queueNum < messagesQueue.length) {
@@ -174,6 +154,9 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
 
     @Override
     public synchronized void stop() {
+        for(KafkaProducer producer : kafkaProducers){
+            producer.close();
+        }
         counter.stop();
         logger.info("Kafka Sink {} stopped. Metrics: {}", getName(), counter);
         super.stop();
@@ -196,13 +179,29 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
     @Override
     public void configure(Context context) {
 
+
+        numberOfThreads = context.getInteger(KafkaSinkConstants.THREADS_NUMBER, KafkaSinkConstants.DEFAULT_THREADS_NUMBER);
+        props = KafkaSinkUtil.getKafkaProperties(context);
+        batchSize = context.getInteger(KafkaSinkConstants.BATCH_SIZE,
+                KafkaSinkConstants.DEFAULT_BATCH_SIZE);
+
+        kafkaProducers = new KafkaProducer[numberOfThreads];
+        producerArr = new KafkaSink[numberOfThreads];
+        messagesQueue = new String[batchSize];
+
+        logger.debug("BATCH SIZE: " + batchSize);
+
         for (int i = 0; i < numberOfThreads; i++) {
-            KafkaProducer<String, byte[]> producer = new KafkaProducer<>(props);
+            KafkaProducer<String, String> producer = new KafkaProducer<>(props);
             producerArr[i] = (new KafkaSink(messagesQueue, producer, Integer.toString(i + 1)));
         }
 
+        logger.debug("Using batch size: {}", batchSize);
+
+
         topic = context.getString(KafkaSinkConstants.TOPIC,
                 KafkaSinkConstants.DEFAULT_TOPIC);
+
         if (topic.equals(KafkaSinkConstants.DEFAULT_TOPIC)) {
             logger.warn("The Property 'topic' is not set. " +
                     "Using the default topic name: " +
@@ -212,21 +211,21 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
                     " this may be over-ridden by event headers");
         }
 
-
         if (counter == null) {
             counter = new KafkaSinkCounter(getName());
         }
 
+
     }
 
-    Lock lock = new ReentrantLock();
+    private Lock lock = new ReentrantLock();
 
     public class KafkaSink extends Thread {
 
         private String[] kafkaSinkQueue;
         private KafkaProducer<String, String> producer;
 
-        KafkaSink(String[] kafkaSinkQueue, KafkaProducer producer, String threadName) {
+        KafkaSink(String[] kafkaSinkQueue, KafkaProducer<String, String> producer, String threadName) {
             this.kafkaSinkQueue = kafkaSinkQueue;
             this.producer = producer;
             super.setName(threadName);
@@ -236,7 +235,7 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
         public synchronized void run() {
             long startTime = System.nanoTime();
             for (String aKafkaSinkQueue : kafkaSinkQueue) {
-                producer.send(new ProducerRecord<>("fastkafka56", aKafkaSinkQueue));
+                producer.send(new ProducerRecord<>(topic, aKafkaSinkQueue));
             }
             producer.flush();
             long endTime = System.nanoTime();

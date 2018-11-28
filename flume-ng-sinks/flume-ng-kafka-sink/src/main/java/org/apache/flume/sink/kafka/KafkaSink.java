@@ -69,7 +69,6 @@ public class KafkaSink extends AbstractSink implements Configurable {
     private KafkaProducer<String, byte[]> producer;
     private String topic;
     private int batchSize;
-    //    private List<KeyedMessage<String, byte[]>> messageList;
     private KafkaSinkCounter counter;
     private List<byte[]> messageList;
 

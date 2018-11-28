@@ -28,13 +28,13 @@ public class KafkaSinkConstants {
   public static final String BATCH_SIZE = "batchSize";
   public static final String MESSAGE_SERIALIZER_KEY = "serializer.class";
   public static final String KEY_SERIALIZER_KEY = "key.serializer.class";
-  public static final String BROKER_LIST_KEY = "metadata.broker.list";
   public static final String REQUIRED_ACKS_KEY = "request.required.acks";
-  public static final String BROKER_LIST_FLUME_KEY = "brokerList";
   public static final String REQUIRED_ACKS_FLUME_KEY = "requiredAcks";
+  public static final String THREADS_NUMBER = "threadsNumber";
 
 
 
+  public static final int DEFAULT_THREADS_NUMBER = 16;
   public static final int DEFAULT_BATCH_SIZE = 100;
   public static final String DEFAULT_TOPIC = "default-flume-topic";
   public static final String DEFAULT_MESSAGE_SERIALIZER =
