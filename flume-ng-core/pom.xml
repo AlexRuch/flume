@@ -123,6 +123,14 @@ limitations under the License.
         <artifactId>apache-rat-plugin</artifactId>
       </plugin>
 
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <source>8</source>
+          <target>8</target>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 
@@ -383,5 +391,9 @@ limitations under the License.
     </dependency>
 
   </dependencies>
+
+  <properties>
+    <maven.test.skip>true</maven.test.skip>
+  </properties>
 
 </project>
