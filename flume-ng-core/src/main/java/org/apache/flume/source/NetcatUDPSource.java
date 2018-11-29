@@ -68,19 +68,17 @@ public class NetcatUDPSource extends AbstractSource
 
     public class NetcatHandler extends SimpleChannelHandler {
 
-        List<MessageEvent> messageEventList = new ArrayList<MessageEvent>();
+        List<MessageEvent> messageEventList = new ArrayList<MessageEvent>(10000);
         int counter = 0;
 
         @Override
         public void messageReceived(ChannelHandlerContext ctx, MessageEvent mEvent) {
 
-            if (counter < 10000) {
+            if (messageEventList.size() < 10000) {
                 messageEventList.add(mEvent);
-                counter++;
             } else {
                 new Thread(new EventReaderThread(messageEventList)).start();
-                messageEventList = new ArrayList<>();
-                counter = 0;
+                messageEventList = new ArrayList<>(10000);
             }
         }
     }
