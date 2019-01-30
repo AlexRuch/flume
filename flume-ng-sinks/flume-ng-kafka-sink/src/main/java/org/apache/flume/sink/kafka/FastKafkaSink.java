@@ -25,6 +25,7 @@ import org.apache.flume.instrumentation.kafka.KafkaSinkCounter;
 import org.apache.flume.sink.AbstractSink;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.utils.AppInfoParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -64,7 +65,7 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 public class FastKafkaSink extends AbstractSink implements Configurable {
 
-    private static final Logger logger = LoggerFactory.getLogger(KafkaSink.class);
+    private static final Logger logger = LoggerFactory.getLogger(FastKafkaSink.class);
     public static final String KEY_HDR = "key";
     public static final String TOPIC_HDR = "topic";
     private String topic;
@@ -122,11 +123,10 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
 
             producerArr[producerIndex] = newKafkaSink;
 
-        } catch (
-                Exception ex) {
+        } catch (Exception ex) {
+            result = Status.BACKOFF;
             String errorMsg = "Failed to publish events";
             logger.error("Failed to publish events", ex);
-            result = Status.BACKOFF;
             if (transaction != null) {
                 try {
                     transaction.rollback();
@@ -137,6 +137,7 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
                 }
             }
             throw new EventDeliveryException(errorMsg, ex);
+
         } finally {
             if (transaction != null) {
                 transaction.close();
@@ -154,7 +155,7 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
 
     @Override
     public synchronized void stop() {
-        for(KafkaProducer producer : kafkaProducers){
+        for (KafkaProducer producer : kafkaProducers) {
             producer.close();
         }
         counter.stop();
@@ -211,6 +212,7 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
                     " this may be over-ridden by event headers");
         }
 
+        logger.info("KAFKA INFO VERSION" + AppInfoParser.getVersion());
         if (counter == null) {
             counter = new KafkaSinkCounter(getName());
         }
@@ -221,6 +223,7 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
     private Lock lock = new ReentrantLock();
 
     public class KafkaSink extends Thread {
+
 
         private String[] kafkaSinkQueue;
         private KafkaProducer<String, String> producer;
@@ -235,7 +238,8 @@ public class FastKafkaSink extends AbstractSink implements Configurable {
         public synchronized void run() {
             long startTime = System.nanoTime();
             for (String aKafkaSinkQueue : kafkaSinkQueue) {
-                producer.send(new ProducerRecord<>(topic, aKafkaSinkQueue));
+//                producer.send(new ProducerRecord<>(topic, aKafkaSinkQueue));
+                producer.send(new ProducerRecord<>(topic,  aKafkaSinkQueue));
             }
             producer.flush();
             long endTime = System.nanoTime();

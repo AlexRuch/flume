@@ -70,6 +70,7 @@ public class MultiportTCPSource extends AbstractSource implements
     private Charset defaultCharset;
     private ThreadSafeDecoder defaultDecoder;
     private Set<String> keepFields;
+    private static boolean isPortPrefix;
 
     public MultiportTCPSource() {
         portCharsets = new ConcurrentHashMap<Integer, ThreadSafeDecoder>();
@@ -87,6 +88,8 @@ public class MultiportTCPSource extends AbstractSource implements
             Integer port = Integer.parseInt(portStr);
             ports.add(port);
         }
+
+        isPortPrefix = context.getBoolean(SyslogSourceConfigurationConstants.CONFIG_PORT_PREFIX);
 
         host = context.getString(SyslogSourceConfigurationConstants.CONFIG_HOST);
 
@@ -293,11 +296,13 @@ public class MultiportTCPSource extends AbstractSource implements
                 for (int num = 0; num < batchSize && buf.hasRemaining(); num++) {
 
                     if (lineSplitter.parseLine(buf, savedBuf, parsedLine)) {
-                        Event event = parseEvent(parsedLine, decoder);
-                        if (portHeader != null) {
-                            event.getHeaders().put(portHeader, String.valueOf(port));
+                        Event event = parseEvent(parsedLine, decoder, port);
+//                        if (portHeader != null) {
+//                            event.getHeaders().put(portHeader, String.valueOf(port));
+//                        }
+                        if (event != null) {
+                            events.add(event);
                         }
-                        events.add(event);
                     } else {
                         logger.trace("Parsed null event");
                     }
@@ -334,13 +339,27 @@ public class MultiportTCPSource extends AbstractSource implements
          * @param decoder   Character set is configurable on a per-port basis.
          * @return
          */
-        Event parseEvent(ParsedBuffer parsedBuf, CharsetDecoder decoder) {
+        Event parseEvent(ParsedBuffer parsedBuf, CharsetDecoder decoder, int port) {
+
             String msg = null;
             try {
-                msg = parsedBuf.buffer.getString(decoder);
+                String tmpBuf = parsedBuf.buffer.getString(decoder);
+                if (tmpBuf.length() == 0) {
+                    return null;
+                }
+                if (isPortPrefix) {
+                    msg = port + "\t" + tmpBuf;
+                } else {
+                    msg = tmpBuf;
+                }
+
             } catch (Throwable t) {
-                logger.info("Error decoding line with charset (" + decoder.charset() +
+
+                logger.trace("Error decoding line with charset (" + decoder.charset() +
                         "). Exception follows.", t);
+                logger.trace("==========================");
+                logger.trace(parsedBuf.buffer.getHexDump());
+                logger.trace("==========================");
 
                 if (t instanceof Error) {
                     Throwables.propagate(t);
@@ -350,19 +369,28 @@ public class MultiportTCPSource extends AbstractSource implements
                 byte[] bytes = new byte[parsedBuf.buffer.remaining()];
                 parsedBuf.buffer.get(bytes);
 
-                Event event = EventBuilder.withBody(bytes);
-                event.getHeaders().put(SyslogUtils.EVENT_STATUS,
-                        SyslogUtils.SyslogStatus.INVALID.getSyslogStatus());
-
-                return event;
+                if (isPortPrefix) {
+                    byte[] portByte = (port + "\t").getBytes();
+                    int bytesWithPortLength = portByte.length + bytes.length;
+                    byte[] bytesWithPort = new byte[bytesWithPortLength];
+                    int portByteLength = portByte.length;
+                    System.arraycopy(portByte, 0, bytesWithPort, 0, portByteLength);
+                    System.arraycopy(bytes, 0, bytesWithPort, portByteLength, bytes.length);
+                    return EventBuilder.withBody(bytesWithPort);
+                } else {
+                    return EventBuilder.withBody(bytes);
+                }
+//
+//                Event event = EventBuilder.withBody(bytes);
+//                event.getHeaders().put(SyslogUtils.EVENT_STATUS,
+//                        SyslogUtils.SyslogStatus.INVALID.getSyslogStatus());
+//
+//                return event;
             }
 
             logger.trace("Seen raw event: {}", msg);
 
-            Event event;
-            event = EventBuilder.withBody(msg.getBytes());
-
-            return event;
+            return EventBuilder.withBody(msg.getBytes());
         }
     }
 

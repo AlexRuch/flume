@@ -78,7 +78,7 @@ public class MultiportUDPSource extends AbstractSource
                 SyslogSourceConfigurationConstants.CONFIG_READBUF_SIZE,
                 SyslogSourceConfigurationConstants.DEFAULT_READBUF_SIZE);
 
-//        numProcessors = context.getInteger(SyslogSourceConfigurationConstants.CONFIG_NUMPROCESSORS);
+        numProcessors = context.getInteger(SyslogSourceConfigurationConstants.CONFIG_NUMPROCESSORS);
 
         if (sourceCounter == null) {
             sourceCounter = new SourceCounter(getName());
@@ -127,7 +127,7 @@ public class MultiportUDPSource extends AbstractSource
             DatagramChannel serverSocket = DatagramChannel.open();
             serverSocket.socket().bind(new InetSocketAddress(port));
             ByteBuffer[] messages = new ByteBuffer[batchSize];
-            ExecutorService executor = Executors.newFixedThreadPool(4);
+            ExecutorService executor = Executors.newFixedThreadPool(numProcessors);
             int count = 0;
             while (true) {
                 ByteBuffer buf = ByteBuffer.allocate(readBufferSize);

@@ -25,6 +25,7 @@ import org.apache.flume.instrumentation.kafka.KafkaSinkCounter;
 import org.apache.flume.sink.AbstractSink;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.common.utils.AppInfoParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -224,6 +225,7 @@ public class KafkaSink extends AbstractSink implements Configurable {
             counter = new KafkaSinkCounter(getName());
         }
 
+        logger.info("KAFKA INFO VERSION_KAFKA_SINK" + AppInfoParser.getVersion());
         producer.initTransactions();
     }
 

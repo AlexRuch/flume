@@ -22,6 +22,8 @@ public final class SyslogSourceConfigurationConstants {
 
   public static final String CONFIG_PORT = "port";
 
+  public static final String CONFIG_PORT_PREFIX = "usePortPrefix";
+
   /**
    * List of ports to listen to.
    */
@@ -43,6 +45,7 @@ public final class SyslogSourceConfigurationConstants {
    * Number of processors used to calculate number of threads to spawn.
    */
   public static final String CONFIG_NUMPROCESSORS = "numProcessors";
+
 
   /**
    * Maximum allowable size of events.

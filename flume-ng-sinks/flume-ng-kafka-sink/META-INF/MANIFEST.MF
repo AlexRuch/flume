@@ -1,0 +1,2 @@
+Manifest-Version: 1.0
+Class-Path: /var/lib/flume-ng/plugins.d/kafka-clients-2.1.0.jar
